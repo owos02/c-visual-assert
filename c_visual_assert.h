@@ -14,9 +14,12 @@
 #include <utility>
 #include <iomanip>
 #include <vector>
+#include <format>
 
 namespace c_visual_assert_ {
     inline static std::vector< std::pair< bool, const char * > > calledAsserts_;
+
+    inline static int assertionCounter = 0;
 
     namespace Settings {
         /// Disables the visual display of asserts for the future asserts.
@@ -27,6 +30,10 @@ namespace c_visual_assert_ {
         inline volatile static bool collectionMode = false;
         /// Enables borders for the conditions when displaying the list of asserts.
         inline volatile static bool listAssertMessageBorder = false;
+
+        inline volatile static int  leftOffset   = 80;
+        inline volatile static int  rightOffset  = 40;
+        inline volatile static char fillerSymbol = '.';
     }
 
     /// Define Colors based on the ANSI escape codes
@@ -34,6 +41,7 @@ namespace c_visual_assert_ {
         inline static auto FAILURE   = "91";
         inline static auto SUCCESS   = "92";
         inline static auto ASSERTING = "93";
+        inline static auto INFO      = "94";
     }
 
     /// Define messages for the output
@@ -43,13 +51,21 @@ namespace c_visual_assert_ {
         inline auto ASSERTING = "ASSERTING";
     }
 
-#define c_visual_assert_ansi(condition, message) \
-    if(!Settings::quiet)\
-        std::cout << "\033[1;" << ANSI_Colors::ASSERTING << "m "<<Message::ASSERTING<<": \033[0m" << "\033[3m"<< message << "\033[0m";\
-    if(!condition && !Settings::quiet)\
-        std::cout << "\t-- \033[1;52;" << ANSI_Colors::FAILURE << "m "<<Message::FAILURE<<" \033[0m" << std::endl;\
-    else if(!Settings::quiet)\
-        std::cout << "\t--\t \033[1;52;" << ANSI_Colors::SUCCESS << "m "<<Message::SUCCESS<<" \033[0m" << std::endl; \
+#define c_visual_assert_ansi(condition, message)                                                                                \
+    assertionCounter++;                                                                                                         \
+    if(!Settings::quiet) {                                                                                                      \
+        auto displayMessage = std::format("\033[1;37m[{1}] \033[1;{0}m{2}:\033[0m\033[3m {3}\033[0m",                           \
+                                ANSI_Colors::ASSERTING, assertionCounter, Message::ASSERTING, message);                         \
+        std::cout << std::left << std::setw(Settings::leftOffset) << std::setfill(Settings::fillerSymbol) << displayMessage ;   \
+    }                                                                                                                           \
+    if(!condition && !Settings::quiet) {                                                                                        \
+        auto displayFailure = std::format("\033[1;52;{0}m {1} \033[0m\n", ANSI_Colors::FAILURE, Message::FAILURE );             \
+        std::cout << std::right << std::setw(Settings::rightOffset) << std::setfill(Settings::fillerSymbol) << displayFailure;  \
+    }                                                                                                                           \
+    else if(!Settings::quiet)  {                                                                                                \
+        auto displaySuccess = std::format("\033[1;52;{0}m {1} \033[0m\n", ANSI_Colors::SUCCESS, Message::SUCCESS );             \
+        std::cout << std::right << std::setfill(Settings::fillerSymbol) << std::setw(Settings::rightOffset) << displaySuccess;  \
+    }                                                                                                                           \
     assert( message && condition);
 
 #define c_assert_windows(condition, message) c_visual_assert_ansi( condition, message  )
@@ -59,24 +75,27 @@ namespace c_visual_assert_ {
         if ( Settings::collectionMode )
             calledAsserts_.emplace_back( condition, message );
 #ifdef _WIN32
-        //c_assert_windows(condition, message);
+        c_assert_windows(condition, message);
 #elif __unix__
         c_visual_assert_ansi( condition, message );
 #endif
 #endif
     }
 
-    inline bool check_collection_mode_is_disabled() {
-        if (!Settings::collectionMode)
-            std::cout << "Collection Mode: \33[1;4;" << ANSI_Colors::FAILURE << "mDisabled\33[0m" <<  std::endl;
-        return (!Settings::collectionMode);
+    inline bool check_collection_mode_is_disabled( ) {
+        if ( !Settings::collectionMode ) {
+            auto msg = std::format( "\33[1;{0}mCollection Mode\33[0m: \33[1;4;{1}mDisabled\33[0m\n", ANSI_Colors::INFO, ANSI_Colors::FAILURE );
+            std::cout << msg;
+        }
+        return ( !Settings::collectionMode );
     }
-
+#define c_visual_headline_print(message) \
+std::cout << std::format("\n\33[1;4m{0}\33[0m\n", message);
     /// Shows stats about the successful and failed asserts
     /// For proper use define 'NDEBUG'
     inline void c_visual_assert_list_stats( ) {
 #if defined(c_visual_assert_enable_debug) || defined(DEBUG)
-        if (check_collection_mode_is_disabled())
+        if ( check_collection_mode_is_disabled( ) )
             return;
 
         int    successes           = 0, failures           = 0;
@@ -88,35 +107,38 @@ namespace c_visual_assert_ {
                 failures++;
         }
         successesPercentage = successes == 0
-                                    ? 0
-                                    : ( successes * 100 ) / static_cast< double >( calledAsserts_.size( ) );
-        failuresPercentage  = failures == 0
                                   ? 0
-                                  : ( ( failures * 100 ) / static_cast< double >( calledAsserts_.size( ) ) );
-        std::cout << std::endl << "\033[1;4mStatistics about the assertions\033[0m" << std::endl;
-        std::cout << std::endl << "Amount of assertions: \033[1;4;"<<ANSI_Colors::ASSERTING<< "m" << calledAsserts_.size( ) << "\033[0m"<< std::endl;
-        std::cout << "Percentages ( \033[1;4;" << ANSI_Colors::SUCCESS << "mSuccess\033[0m | \033[1;4;" <<
-                ANSI_Colors::FAILURE << "mFailure\033[0m )" << std::endl << std::setw(19)
-                << "\033[4;" << ANSI_Colors::SUCCESS << "m" << std::fixed << std::setprecision(2) << successesPercentage << "\033[0m%" << " | "
-                << "\033[4;" << ANSI_Colors::FAILURE << "m" << failuresPercentage << "\033[0m%" << std::endl;
-        std::cout << "Successful assertions: \033[" << ANSI_Colors::SUCCESS << "m" << successes << "\033[0m" <<
-                std::endl;
-        std::cout << "Failed assertions: \033[" << ANSI_Colors::FAILURE << "m" << failures << "\033[0m" << std::endl;
+                                  : ( successes * 100 ) / static_cast< double >( calledAsserts_.size( ) );
+        failuresPercentage = failures == 0
+                                 ? 0
+                                 : ( ( failures * 100 ) / static_cast< double >( calledAsserts_.size( ) ) );
+        c_visual_headline_print("Statistics about the assertions");
+        std::cout  << std::setfill(' ')<< std::left << std::setw(25) << std::format("Amount of assertions:")
+        << std::right << std::setw(5) << std::format("\033[1;{0}m{1}\033[0m\n", ANSI_Colors::ASSERTING ,  calledAsserts_.size( ) );
+        std::cout << std::left <<std::setw(25) << std::format("Successful assertions:")  <<
+            std::format("\033[{0}m{1}\033[0m\n", ANSI_Colors::SUCCESS, successes);
+        std::cout << std::left <<std::setw(25) << std::format("Failed assertions:")  <<
+            std::format("\033[{0}m{1}\033[0m\n",ANSI_Colors::FAILURE, failures);
+        std::cout << std::left << std::setw(16) << std::format("\nPercentages")  <<
+            std::format("( \033[1;{}mSuccess\033[0m | \033[1;{}mFailure\033[0m )\n",ANSI_Colors::SUCCESS, ANSI_Colors::FAILURE );
+        std::cout << std::fixed << std::setprecision( 2 ) << std::right <<std::setw(35) <<
+            std::format("\033[4;{0}m{1}\033[0m%", ANSI_Colors::SUCCESS, successesPercentage) << " | " <<
+            std::format("\033[4;{0}m{1}\033[0m%\n", ANSI_Colors::FAILURE, failuresPercentage);
 #endif
     }
 
     inline void c_visual_assert_list_all( ) {
 #if defined(c_visual_assert_enable_debug) || defined(DEBUG)
-        if (check_collection_mode_is_disabled())
+        if ( check_collection_mode_is_disabled( ) )
             return;
-        std::cout << std::endl << "\033[1;4mList of Assertions\033[0m" << std::endl;
+        c_visual_headline_print("List of Assertions");
         for ( auto [ condition, message ] : calledAsserts_ ) {
-            std::cout << "\033[" << ( Settings::listAssertMessageBorder ? "52" : "0" ) << ";3m " << message <<
-                    " \033[0m";
+            std::cout << std::left << std::setw(60) <<std::setfill(Settings::fillerSymbol) <<
+                std::format("\033[{};3m {} \033[0m", ( Settings::listAssertMessageBorder ? "52" : "0" ),message );
             if ( condition )
-                std::cout << "was \033[1;" << ANSI_Colors::SUCCESS << "mTrue\033[0m" << std::endl;
+                std::cout << std::format("was \033[1;{}mTrue\033[0m\n", ANSI_Colors::SUCCESS);
             else
-                std::cout << "was \033[1;" << ANSI_Colors::FAILURE << "mFailure\033[0m" << std::endl;
+                std::cout << std::format("was \033[1;{}mFalse\033[0m\n", ANSI_Colors::FAILURE);
         }
 #endif
     }
@@ -133,3 +155,4 @@ namespace c_visual_assert_ {
 #define c_visual_assert_list_all c_visual_assert_::c_visual_assert_list_all();
 
 #define c_visual_assert_list_stats c_visual_assert_::c_visual_assert_list_stats();
+
